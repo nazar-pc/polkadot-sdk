@@ -56,7 +56,7 @@ use sc_cli::{CheckBlockCmd, ExportBlocksCmd, ExportStateCmd, ImportBlocksCmd, Re
 use sc_client_api::BlockchainEvents;
 use sc_consensus::{
 	import_queue::{BasicQueue, Verifier as VerifierT},
-	BlockImportParams, DefaultImportQueue, ImportQueue,
+	BlockImportParams, DefaultImportQueue, ImportQueue, SharedBlockImport,
 };
 use sc_executor::{HeapAllocStrategy, WasmExecutor, DEFAULT_HEAP_ALLOC_STRATEGY};
 use sc_network::{config::FullNetworkConfiguration, service::traits::NetworkBackend, NetworkBlock};
@@ -491,7 +491,13 @@ where
 		let registry = config.prometheus_registry();
 		let spawner = task_manager.spawn_essential_handle();
 
-		Ok(BasicQueue::new(verifier, Box::new(block_import), None, &spawner, registry))
+		Ok(BasicQueue::new(
+			verifier,
+			SharedBlockImport::new(block_import),
+			None,
+			&spawner,
+			registry,
+		))
 	}
 }
 
