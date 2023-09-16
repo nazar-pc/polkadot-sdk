@@ -17144,6 +17144,7 @@ dependencies = [
  "sp-test-primitives",
  "substrate-prometheus-endpoint",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]

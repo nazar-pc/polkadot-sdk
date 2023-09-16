@@ -32,6 +32,7 @@ use log::{debug, trace};
 use std::{
 	fmt,
 	future::Future,
+	num::NonZeroUsize,
 	ops::Deref,
 	pin::Pin,
 	sync::Arc,
@@ -129,6 +130,18 @@ pub struct IncomingBlock<B: BlockT> {
 /// Verify a justification of a block
 #[async_trait::async_trait]
 pub trait Verifier<B: BlockT>: Send + Sync {
+	/// How many blocks can be verified concurrently.
+	///
+	/// Defaults to 1, which means blocks are verified sequentially, one at a time.
+	///
+	/// value higher than one means verification on blocks can be done in arbitrary order,
+	/// doesn't expect parent block to be imported first, etc. This significantly improves sync
+	/// speed by leveraging multiple CPU cores. Good value here is to make concurrency equal to
+	/// number of CPU cores available.
+	fn verification_concurrency(&self) -> NonZeroUsize {
+		NonZeroUsize::new(1).expect("Not zero; qed")
+	}
+
 	/// Verify the given block data and return the `BlockImportParams` to
 	/// continue the block import process.
 	async fn verify(&self, block: BlockImportParams<B>) -> Result<BlockImportParams<B>, String>;
@@ -138,6 +151,10 @@ impl<Block> Verifier<Block> for Arc<dyn Verifier<Block>>
 where
 	Block: BlockT,
 {
+	fn verification_concurrency(&self) -> NonZeroUsize {
+		(**self).verification_concurrency()
+	}
+
 	fn verify<'life0, 'async_trait>(
 		&'life0 self,
 		block: BlockImportParams<Block>,
@@ -278,7 +295,9 @@ where
 	Block: BlockT,
 	BI: BlockImport<Block, Error = ConsensusError>,
 {
-	match verify_single_block_metered(import_handle, block_origin, block, verifier, None).await? {
+	match verify_single_block_metered(import_handle, block_origin, block, verifier, false, None)
+		.await?
+	{
 		SingleBlockVerificationOutcome::Imported(import_status) => Ok(import_status),
 		SingleBlockVerificationOutcome::Verified(import_parameters) =>
 			import_single_block_metered(import_handle, import_parameters, None).await,
@@ -347,6 +366,7 @@ pub(crate) async fn verify_single_block_metered<Block, BI>(
 	block_origin: BlockOrigin,
 	block: IncomingBlock<Block>,
 	verifier: &dyn Verifier<Block>,
+	allow_missing_parent: bool,
 	metrics: Option<&Metrics>,
 ) -> Result<SingleBlockVerificationOutcome<Block>, BlockImportError>
 where
@@ -383,7 +403,7 @@ where
 				parent_hash,
 				allow_missing_state: block.allow_missing_state,
 				import_existing: block.import_existing,
-				allow_missing_parent: block.state.is_some(),
+				allow_missing_parent: allow_missing_parent || block.state.is_some(),
 			})
 			.await,
 	)? {
